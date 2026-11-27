@@ -1,5 +1,7 @@
 # YOLOv11n Deployment Guide & Execution Log: Seeed reCamera (SG2002)
 
+> Reference notes for converting a trained `.pt` model to a `.cvimodel`. For everyday deploy/restore on this camera, use the [README](../README.md) and `recamera`; conversion is only needed when you retrain.
+
 This document records the exact commands and configuration steps for exporting and deploying a custom `weights.pt` (YOLO11n architecture) to the Seeed Studio reCamera.
 
 ---
@@ -454,14 +456,13 @@ cv2.destroyAllWindows()
 
 ---
 
-## 9. Live Viewer Script: `view_live.py`
+## 9. Live Viewer
 
-A ready-to-run live visualization script has been created at:
-`C:\Users\lautl\Documents\Innowing\seeed studio\view_live.py`
+The live viewer ships as part of the package:
 
 ### Usage:
 ```bash
-python view_live.py --labels person bicycle car
+uv run recamera view --labels person bicycle car
 ```
 - Queries system health, firmware version, and model list via the Supervisor REST API.
 - Ingests RTSP video and WebSocket metadata feeds.
@@ -474,11 +475,14 @@ python view_live.py --labels person bicycle car
 The project now includes a modular Python library under `recamera/` along with `requirements.txt` and `README.md`.
 
 ### Modules:
-- `recamera.client.ReCamera`: Top-level unified context manager client.
-- `recamera.stream.StreamReceiver`: Concurrent RTSP video + WebSocket metadata engine.
+- `recamera.client.ReCamera`: unified context-manager client for video + detections.
+- `recamera.stream.StreamReceiver`: concurrent RTSP video + WebSocket metadata engine.
+- `recamera.detections`: normalises `/ws/boxes` payloads (0–100 scores, preview-space coordinates).
 - `recamera.drawing.draw_detections`: OpenCV rendering for bounding boxes and labels.
-- `recamera.analytics.ZoneMonitor` & `PersistenceFilter`: ROI intrusion zones and temporal false-positive suppression.
-- `recamera.api.ReCameraAPI`: Supervisor HTTP REST client for device info, metrics, and model uploads.
+- `recamera.analytics.ZoneMonitor` & `PersistenceFilter`: ROI zones and temporal false-positive suppression.
+- `recamera.api.Supervisor`: supervisor HTTP REST client (device info, chunked model upload).
+- `recamera.nodered.NodeRed`: Node-RED admin client and model-node patching.
+- `recamera.manifest`: the `model_info.json` model-folder format and validation.
 
-See `README.md` for complete API documentation and usage examples.
+See the [README](../README.md) for deploy/restore commands and `recamera view` usage; the module sources are under `recamera/`.
 

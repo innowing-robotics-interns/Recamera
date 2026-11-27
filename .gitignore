@@ -34,7 +34,6 @@ venv.bak/
 *.secret
 
 # Model Weights & Compiled Artifacts
-models/
 *.pt
 *.onnx
 *.cvimodel
@@ -42,6 +41,13 @@ models/
 *.npz
 *_calib_table
 calibration/
+
+# The two ready-to-deploy models are tracked on purpose
+!models/screw-nut/model.cvimodel
+!models/yolo11n-detection/model.cvimodel
+
+# Camera state snapshots made by deploy.py
+backups/
 
 # IDE & Editor caches
 .idea/
@@ -55,3 +61,7 @@ ehthumbs.db
 Desktop.ini
 $RECYCLE.BIN/
 .DS_Store
+
+# build / test caches
+.pytest_cache/
+.ruff_cache/

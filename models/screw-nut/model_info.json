@@ -1,0 +1,16 @@
+{
+  "model_id": "3354b048-75ca-42fe-9f40-5d028fb34377",
+  "model_name": "yolo11n-aabb-screw-nut.onnx",
+  "flow_name": "yolo11n-aabb-screw-nut",
+  "classes": [
+    "screw",
+    "nut"
+  ],
+  "thresholds": {
+    "score": 0.5,
+    "iou": 0.4
+  },
+  "md5": "34427e072595bc09fef6489db973cfad",
+  "size": 3120000,
+  "note": "YOLO11n axis-aligned screw/nut detector compiled for cv181x (copied from the camera)."
+}

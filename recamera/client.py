@@ -1,106 +1,108 @@
-"""
-Main client entry point for the recamera SDK.
-"""
+"""High-level client: one object for video, detections and the REST API."""
 
-import os
-from typing import Callable, Dict, List, Optional, Tuple
-import cv2
+from __future__ import annotations
+
+from typing import Any
+
 import numpy as np
 
-try:
-    from dotenv import load_dotenv
-    load_dotenv()
-except ImportError:
-    pass
-
 from .analytics import PersistenceFilter, ZoneMonitor
-from .api import ReCameraAPI
-from .drawing import draw_detections
+from .api import Supervisor
+from .config import Config
+from .detections import DEFAULT_PREVIEW
 from .stream import StreamReceiver
 
 
 class ReCamera:
-    """Unified client for Seeed Studio reCamera."""
+    """Unified client for a Seeed Studio reCamera."""
 
     def __init__(
         self,
-        camera_ip: Optional[str] = None,
-        labels: Optional[List[str]] = None,
-        rtsp_port: Optional[int] = None,
-        rtsp_path: Optional[str] = None,
-        rtsp_username: Optional[str] = None,
-        rtsp_password: Optional[str] = None,
-        ws_port: Optional[int] = None,
-        ws_path: Optional[str] = None,
-        api_port: Optional[int] = None,
+        camera_ip: str | None = None,
+        labels: list[str] | None = None,
+        rtsp_port: int | None = None,
+        rtsp_path: str | None = None,
+        rtsp_username: str | None = None,
+        rtsp_password: str | None = None,
+        ws_port: int | None = None,
+        ws_path: str | None = None,
+        api_port: int | None = None,
+        preview_size: tuple[int, int] | None = None,
+        rtsp: bool = True,
     ):
-        self.camera_ip = camera_ip or os.getenv("RECAMERA_IP", "192.168.42.1")
+        config = Config.from_env()
+        self.config = config
+        self.camera_ip = camera_ip or config.camera_ip
         self.labels = labels or []
 
-        _rtsp_port = rtsp_port or int(os.getenv("RECAMERA_RTSP_PORT", "554"))
-        _rtsp_path = rtsp_path or os.getenv("RECAMERA_RTSP_PATH", "/live")
-        _rtsp_user = rtsp_username if rtsp_username is not None else os.getenv("RECAMERA_RTSP_USER", "admin")
-        _rtsp_pass = rtsp_password if rtsp_password is not None else os.getenv("RECAMERA_RTSP_PASS", "admin")
-
-        _ws_port = ws_port or int(os.getenv("RECAMERA_WS_PORT", "1880"))
-        _ws_path = ws_path or os.getenv("RECAMERA_WS_PATH", "/ws/boxes")
-        _api_port = api_port or int(os.getenv("RECAMERA_API_PORT", "80"))
-
-        self.api = ReCameraAPI(camera_ip=self.camera_ip, port=_api_port)
+        self.api = Supervisor(camera_ip=self.camera_ip, port=api_port or config.api_port)
         self._stream = StreamReceiver(
             camera_ip=self.camera_ip,
-            rtsp_port=_rtsp_port,
-            rtsp_path=_rtsp_path,
-            rtsp_username=_rtsp_user,
-            rtsp_password=_rtsp_pass,
-            ws_port=_ws_port,
-            ws_path=_ws_path,
+            rtsp_port=rtsp_port or config.rtsp_port,
+            rtsp_path=rtsp_path or config.rtsp_path,
+            rtsp_username=config.rtsp_user if rtsp_username is None else rtsp_username,
+            rtsp_password=config.rtsp_pass if rtsp_password is None else rtsp_password,
+            ws_port=ws_port or config.ws_port,
+            ws_path=ws_path or config.ws_path,
             labels=self.labels,
+            preview_size=preview_size or config.preview_size or DEFAULT_PREVIEW,
+            rtsp=rtsp,
         )
 
+    def set_labels(self, labels: list[str]) -> None:
+        """Replace the class labels used when drawing."""
+        self.labels = list(labels)
+        self._stream.labels = list(labels)
+
+    @property
+    def rtsp_url(self) -> str:
+        return self._stream.rtsp_url
+
+    @property
+    def ws_url(self) -> str:
+        return self._stream.ws_url
+
     def connect(self) -> bool:
-        """Start the video and metadata streams."""
         return self._stream.start()
 
     def disconnect(self) -> None:
-        """Disconnect and release resources."""
         self._stream.stop()
 
-    def __enter__(self):
+    def __enter__(self) -> ReCamera:
         self.connect()
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         self.disconnect()
 
-    def read_frame(self) -> Tuple[bool, Optional[np.ndarray], List[Dict]]:
-        """
-        Read the next video frame and latest bounding boxes.
-        :return: (success, frame, boxes)
-        """
+    def read_frame(self) -> tuple[bool, np.ndarray | None, list[dict[str, Any]]]:
         return self._stream.read_frame()
 
-    def draw(self, frame: np.ndarray, boxes: Optional[List[Dict]] = None) -> np.ndarray:
-        """Draw detections onto a frame."""
+    def draw(self, frame: np.ndarray, boxes: list[dict[str, Any]] | None = None) -> np.ndarray:
         return self._stream.draw(frame, boxes)
 
-    def snapshot(self) -> Tuple[bool, Optional[np.ndarray]]:
-        """Grab a single current video frame."""
+    def snapshot(self) -> tuple[bool, np.ndarray | None]:
         return self._stream.snapshot()
+
+    @property
+    def boxes(self) -> list[dict[str, Any]]:
+        return self._stream.get_latest_boxes()
+
+    @property
+    def ws_messages(self) -> int:
+        return self._stream.ws_messages
 
     def create_zone(
         self,
-        zone: Tuple[float, float, float, float],
-        target_classes: Optional[List[int]] = None,
+        zone: tuple[float, float, float, float],
+        target_classes: list[int] | None = None,
         min_score: float = 0.5,
     ) -> ZoneMonitor:
-        """Create a Region-of-Interest monitor."""
         return ZoneMonitor(zone, target_classes=target_classes, min_score=min_score)
 
     def create_persistence_filter(
         self, required_consecutive_frames: int = 3, cooldown_frames: int = 15
     ) -> PersistenceFilter:
-        """Create a debouncing filter for steady detections."""
         return PersistenceFilter(
             required_consecutive_frames=required_consecutive_frames,
             cooldown_frames=cooldown_frames,
