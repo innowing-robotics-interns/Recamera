@@ -35,6 +35,7 @@ Run from the repo root. `uv run` needs no venv activation.
 | `uv run recamera backup` | Save current model + flow |
 | `uv run recamera list` | List bundled models |
 | `uv run recamera wait` | Wait for services to be ready |
+| `uv run recamera fix-flow` | Add the `/ws/boxes` feed to an older camera |
 | `uv run recamera validate models/<name>` | Check a model folder |
 
 Flags: `--ip 192.168.x.x` (any command, Wi-Fi) · `deploy`: `--force`,
@@ -52,6 +53,11 @@ uv run recamera default                     # when done, restore stock model
 
 Success ends with `[+] deploy complete` and `live websocket: N messages`.
 Camera UI: <http://192.168.42.1:1880/dashboard>.
+
+**Brand-new camera:** the stock flow has no `/ws/boxes` feed, so `deploy` adds
+it automatically (you'll see `adding the /ws/boxes feed to the flow`). Your
+custom flow is left intact. To fix an existing camera without redeploying,
+run `uv run recamera fix-flow`.
 
 ## Bundled models
 
