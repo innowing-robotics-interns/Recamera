@@ -1,202 +1,155 @@
 # reCamera model deployment
 
-Deploy a compiled YOLO model to a Seeed Studio reCamera (SG2002 / cv181x), then
-watch it run live. The compiled screw/nut model and the stock YOLO11n Detection
-model are both in this repo, so deploying needs no conversion step and no
-camera password.
+Deploy a compiled YOLO model to a Seeed Studio reCamera and view detections live.
+reCamera Basic 64G (GC2053), firmware **0.2.4**.
 
-Verified on reCamera Basic 64G (GC2053), firmware **0.2.4**: deploy the
-screw/nut model → deploy the stock model → restore from backup → redeploy, with
-detections checked in the live viewer each time.
-
-## Quick start (uv)
-
-Requires [uv](https://docs.astral.sh/uv/) and a reCamera reachable at
-`192.168.42.1` (USB) or its Wi-Fi IP.
+## Quick start
 
 ```bash
-uv sync                       # create .venv and install everything
-uv run recamera status        # device, services, current model
-uv run recamera deploy models/screw-nut
-uv run recamera view          # live video with boxes (labels come from the camera)
+ip -br addr | grep 192.168.42      # camera on USB; expect 192.168.42.x
+uv sync                            # once per computer (needs uv)
+uv run recamera status             # camera + services + current model
+uv run recamera deploy models/screw-nut   # ~1-2 min
+uv run recamera view               # live video with boxes; q to quit
 ```
 
-`recamera` is installed as a command by `uv sync`, so `uv run recamera …` always
-uses the project environment. To use the old entry points, `uv run python
-deploy.py …` and `uv run python view_live.py …` still work.
+Revert to the camera's stock YOLO model at any time:
 
-Prefer pip? `python3 -m venv .venv && . .venv/bin/activate && pip install -e .`
+```bash
+uv run recamera default
+```
+
+`services … failed` on the first `status`? Run `./tools/install_intl_polyfill.sh` once, then repeat.
 
 ## Commands
 
-| Command | What it does |
+Run from the repo root. `uv run` needs no venv activation.
+
+| Command | Action |
 | --- | --- |
-| `recamera status` | Firmware, service state, current model, model-node settings |
-| `recamera deploy models/screw-nut` | Validate, back up, upload, patch the flow, verify the live stream |
-| `recamera default` | Deploy the camera's stock YOLO11n Detection (COCO) model |
-| `recamera backup [--note …]` | Save the current model file, manifest and full flow to `backups/` |
-| `recamera restore [folder]` | Restore the newest backup, or a specific folder |
-| `recamera list` | List the models bundled in this repo |
-| `recamera validate models/<name>` | Check a model folder without touching the camera |
-| `recamera wait` | Wait until Node-RED and SSCMA are running again |
-| `recamera view` | Live RTSP/preview video with detection overlays |
+| `uv run recamera status` | Camera, services, current model |
+| `uv run recamera deploy models/<name>` | Deploy a model (backs up first) |
+| `uv run recamera default` | Revert to the stock YOLO11n model |
+| `uv run recamera view` | Live video with detections |
+| `uv run recamera restore` | Undo: restore newest backup |
+| `uv run recamera backup` | Save current model + flow |
+| `uv run recamera list` | List bundled models |
+| `uv run recamera wait` | Wait for services to be ready |
+| `uv run recamera validate models/<name>` | Check a model folder |
 
-Useful flags on `deploy`: `--force` (re-upload even when the bytes match),
-`--labels screw nut`, `--name`, `--score 0.5`, `--iou 0.4`, `--no-backup`,
-`--no-live`. `--ip 192.168.x.x` works on every command that talks to a camera
-(and `RECAMERA_IP` sets the default).
+Flags: `--ip 192.168.x.x` (any command, Wi-Fi) · `deploy`: `--force`,
+`--labels screw nut`, `--score 0.5`, `--iou 0.4`, `--no-backup`, `--no-live` ·
+`view`: `--save out.jpg`, `--seconds 10 --no-window`.
 
-Every deploy saves a backup first. `restore` ignores the safety snapshots it
-creates itself, so running it twice is stable.
+## Deploy session
 
-## What is in the repo
-
-```
-recamera/
-  cli.py            recamera <command> entry point
-  deploy.py         deploy / backup / restore engine
-  manifest.py       model folder format and validation
-  api.py            supervisor REST client (chunked upload)
-  nodered.py        Node-RED admin client, model-node patching
-  detections.py     normalises /ws/boxes payloads (scores, coordinates)
-  stream.py         RTSP + websocket receiver
-  viewer.py         live viewer
-  drawing.py        box rendering
-models/screw-nut/           compiled screw+nut model + model_info.json
-models/yolo11n-detection/   stock YOLO11n Detection bytes + model_info.json
-tools/install_intl_polyfill.sh   one-time Node-RED stability fix
-docs/model-conversion.md    how to turn a new .pt into a .cvimodel
-docs/manual-web-upload.md   manual web-UI fallback
-tests/                      unit tests, plus opt-in camera integration tests
-backups/                    created at runtime (gitignored)
+```bash
+uv run recamera deploy models/screw-nut     # writes a backup first
+uv run recamera view                        # verify boxes in the live feed
+uv run recamera status                      # confirm model + flow
+uv run recamera default                     # when done, restore stock model
 ```
 
-## Adding a model
+Success ends with `[+] deploy complete` and `live websocket: N messages`.
+Camera UI: <http://192.168.42.1:1880/dashboard>.
 
-A model folder is two files:
+## Bundled models
+
+| Folder | Detects |
+| --- | --- |
+| `models/yolo11n-detection` | 80 COCO objects — the stock model |
+| `models/screw-nut` | screw, nut |
+| `models/yolo11n-screw-nut` | screw, nut (retrained) |
+| `models/yolo11n-screw-nut-best` | screw, nut (retrained) |
+
+Screw/nut models give false positives on other metal parts; retrain + calibrate
+for production accuracy.
+
+## Use your own model
+
+The camera runs only `.cvimodel`, not `.pt`.
 
 ```
-models/<name>/
-  model.cvimodel      compiled cv181x INT8 model; must start with "CviModel"
-  model_info.json     name, class labels in training order, thresholds
+best.pt → best.onnx → model.cvimodel → deploy
 ```
+
+**1. Export** (labels are positional: index 0 is the first class):
+
+```bash
+uv sync --extra convert
+uv run python -c "from ultralytics import YOLO; print(YOLO('model/yolov11n_screw-nut_best.pt').names)"
+uv run python pt_to_onnx.py model/yolov11n_screw-nut_best.pt
+```
+
+**2. Compile.** Either camera web UI (**Workspace → Model Conversion → Upload**,
+camera needs internet) or locally:
+
+```bash
+uv venv --python 3.10 .tpu
+uv pip install --python .tpu/bin/python \
+  https://github.com/sophgo/tpu-mlir/releases/download/v1.30.2/tpu_mlir-1.30.2-py3-none-any.whl \
+  'setuptools<81' 'onnx==1.17.0' onnxsim onnxslim psutil pyyaml torch
+
+OUTPUTS='/model.23/cv2.0/cv2.0.2/Conv_output_0,/model.23/cv3.0/cv3.0.2/Conv_output_0,/model.23/cv2.1/cv2.1.2/Conv_output_0,/model.23/cv3.1/cv3.1.2/Conv_output_0,/model.23/cv2.2/cv2.2.2/Conv_output_0,/model.23/cv3.2/cv3.2.2/Conv_output_0'
+
+.tpu/bin/model_transform --model_name mymodel \
+  --model_def model/yolov11n_screw-nut_best.onnx \
+  --input_shapes '[[1,3,640,640]]' --mean '0.0,0.0,0.0' \
+  --scale '0.0039216,0.0039216,0.0039216' \
+  --keep_aspect_ratio --pixel_format rgb --output_names "$OUTPUTS" \
+  --mlir mymodel.mlir
+
+.tpu/bin/run_calibration mymodel.mlir --dataset calibration --input_num 100 -o calib_table
+
+.tpu/bin/model_deploy --mlir mymodel.mlir --quantize INT8 --quant_input \
+  --processor cv181x --calibration_table calib_table \
+  --customization_format RGB_PACKED --fuse_preprocess --aligned_input \
+  --model mymodel.cvimodel
+```
+
+Calibration needs ~100 real camera frames in `calibration/`; this is what
+determines accuracy.
+
+**3. Package and deploy:**
+
+```bash
+mkdir -p models/my-model
+cp mymodel.cvimodel models/my-model/model.cvimodel
+```
+
+`models/my-model/model_info.json`:
 
 ```json
 {
   "model_id": "my-model",
-  "model_name": "my-model.onnx",
+  "model_name": "mymodel.onnx",
   "flow_name": "my-model",
   "classes": ["screw", "nut"],
   "thresholds": { "score": 0.5, "iou": 0.4 }
 }
 ```
 
-`recamera validate models/<name>` checks the header, the manifest, that labels
-are non-empty and comma-free, and that thresholds are within 0–1. Then
-`recamera deploy models/<name>`.
-
-Class labels **must** be in training order — id 0 is the first label. A wrong
-order produces confident boxes with wrong names.
-
-## One-time camera fix (important)
-
-This firmware ships a Node.js build **without `Intl`**, which makes Node-RED's
-translation layer crash with `ReferenceError: Intl is not defined`. That kills
-Node-RED (and the dashboard/stream) at random. Install the bundled polyfill
-once per camera, or after a firmware update:
-
 ```bash
-./tools/install_intl_polyfill.sh
+uv run recamera validate models/my-model
+uv run recamera deploy models/my-model
 ```
 
-It copies `tools/intl-polyfill.js` to the camera, adds one `require(...)` line
-to the user-writable `~/.node-red/settings.js` (backup:
-`settings.js.bak-intl`), restarts Node-RED and waits until it is up. It is
-idempotent. You will be prompted for the camera SSH password (user
-`recamera`).
-
-## How deployment works
-
-1. `POST /api/deviceMgr/uploadModel` in 512 KiB chunks writes
-   `/userdata/Models/model.cvimodel` and `model.json`; `model_info` rides on
-   the final chunk.
-2. The supervisor reloads Node-RED and SSCMA; this takes ~1–2 minutes, and the
-   tool waits for both to be healthy.
-3. The `model` node in the Node-RED flow is patched — class labels (training
-   order), display name, confidence/IoU, `uri=""` — and the flow is posted to
-   `:1880/flows`.
-4. The tool verifies the model hash and recorded manifest, the flow node, and
-   reads `/ws/boxes` to prove the pipeline is live.
-
-Backups use `GET /api/deviceMgr/getModelFile` and `GET :1880/flows`, both open
-on the local network, which is why no login is needed. An internet connection
-is only needed to *convert* a new model, not to deploy a compiled one.
-
-## Live viewer
-
-```bash
-uv run recamera view --save snapshot.jpg
-uv run recamera view --seconds 10 --no-window --save snapshot.jpg   # headless
-```
-
-It reads the H.264 RTSP stream (1920×1080) and draws the boxes published on
-`ws://<ip>:1880/ws/boxes`. Two things the viewer gets right for you:
-
-- **Class labels** are read from the camera's deployed model, so nothing has to
-  be passed by hand (`--labels` still overrides).
-- **Coordinates and scores**: boxes are in the camera's 1280×720 preview space
-  and scores are integers 0–100 on the wire. Both are normalised, so boxes land
-  on the right pixels and `69` prints as `0.69`.
-
-`q`/`Esc` closes the window. Defaults live in `.env.example`; copy it to `.env`
-if your camera IP or RTSP credentials differ.
-
-## Retraining / converting a new model
-
-Conversion is separate from deployment:
-
-1. Train YOLO11n detect (axis-aligned boxes) and keep the class order.
-2. Export ONNX: `uv run --extra convert python pt_to_onnx.py best.pt`
-   (or `yolo export model=best.pt format=onnx imgsz=640 opset=17 simplify=True
-   dynamic=False`).
-3. Convert ONNX → INT8 `.cvimodel` for `cv181x` using either the camera's
-   **Model Conversion / SenseCraft** web flow, or the TPU-MLIR Docker toolchain
-   in [docs/model-conversion.md](docs/model-conversion.md).
-4. Create `models/<name>/` with the `.cvimodel` and a `model_info.json`, then
-   `uv run recamera deploy models/<name>`.
-
-A model much larger than YOLO11n at 640×640 may exceed the camera's memory and
-leave the preview black.
+Gotchas: labels must match training order · export at 640×640 · models much
+larger than YOLO11n at 640 can exhaust camera memory (black preview) · poor
+accuracy is almost always poor calibration.
 
 ## Troubleshooting
 
 | Symptom | Fix |
 | --- | --- |
-| `cannot reach 192.168.42.1` | Replug USB, wait ~20 s, `ping 192.168.42.1`; use `--ip` for Wi-Fi |
-| Dashboard/stream dead, `:1880` closed, Node-RED `failed` | Run `./tools/install_intl_polyfill.sh` once; then `recamera wait`. If it persists, power-cycle |
-| `camera already holds this exact model file; skipping upload` | Expected — use `--force` to re-upload |
-| No boxes / black preview | Confirm the file is a YOLO11n-sized 640-input `.cvimodel`; check `recamera status` |
-| Wrong box names | Labels must be in training order: fix `model_info.json` and redeploy |
-| Viewer shows `ID:0` instead of names | The camera has no class list for the model; deploy with a `model_info.json` |
-| Deploy looks stuck | First Node-RED start after boot can take 1–2 min; run `recamera status` |
+| `cannot reach 192.168.42.1` | Replug USB, wait ~20 s; on Wi-Fi use `--ip` |
+| `services … failed` | `./tools/install_intl_polyfill.sh`, then `recamera wait` |
+| Dashboard/video dead | Same; power-cycle if it persists |
+| `skipping upload` | Normal; add `--force` to re-upload |
+| Deploy seems stuck | First Node-RED start takes 1–2 min; run `status` |
+| Boxes show `ID:0` | Set `classes` in `model_info.json` |
+| Wrong objects boxed | Better training data + calibration |
 
-## Testing
+## More
 
-```bash
-uv sync --extra test
-uv run pytest                                        # unit tests, no camera
-RECAMERA_INTEGRATION=1 uv run pytest tests/test_integration_camera.py
-```
-
-The integration tests change the model on the camera, restore the original at
-the end, and should point at a camera you can afford to modify.
-
-## Notes
-
-- Tested firmware: reCamera OS 0.2.4; the API endpoints are local to the camera.
-- The camera must have Node-RED/SSCMA enabled (stock firmware default).
-- The bundled `models/yolo11n-detection` bytes are the firmware's own
-  `yolo11n_detection_cv181x_int8.cvimodel` (md5 `7819bd8d…`), so `recamera
-  default` restores exactly what shipped.
-- `backups/`, `.env`, `.venv/` and the original `.pt`/`.onnx` weights are
-  gitignored. The two ready-to-deploy `.cvimodel` files are tracked on purpose.
+[docs/internals.md](docs/internals.md) · [docs/model-conversion.md](docs/model-conversion.md) · [docs/manual-web-upload.md](docs/manual-web-upload.md)

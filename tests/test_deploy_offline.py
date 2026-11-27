@@ -99,6 +99,41 @@ FLOW = [
 ]
 
 
+def test_deploy_installs_the_ws_feed_on_a_factory_flow(model_folder: Path, tmp_path: Path):
+    """A camera whose flow has no /ws/boxes must still end up with one."""
+    from recamera.flows import has_ws_feed
+
+    factory = [{"type": "tab", "id": "t", "label": "Flow 1"}]
+    factory.append(
+        {"type": "model", "id": "m", "z": "t", "model": "old", "classes": "", "uri": "", "wires": []}
+    )
+    factory.append({"type": "camera", "id": "c", "z": "t", "client": "s", "wires": [["m"]]})
+    factory.append({"type": "sscma", "id": "s", "host": "localhost"})
+
+    deployer, _api, nr = build(tmp_path, b"CviModelold", ModelManifest("1", "m", ["a"]), factory)
+    assert not has_ws_feed(nr.flow)
+
+    result = deployer.deploy(model_folder, no_backup=True)
+    assert result.ok
+    assert has_ws_feed(nr.flow), "deploy did not add the /ws/boxes feed"
+
+
+def test_deploy_does_not_duplicate_an_existing_feed(model_folder: Path, tmp_path: Path):
+    from recamera.flows import ensure_ws_feed, has_ws_feed
+
+    flow = [
+        {"type": "tab", "id": "t", "label": "Flow 1"},
+        {"type": "model", "id": "m", "z": "t", "model": "old", "classes": "", "uri": "", "wires": []},
+    ]
+    ensure_ws_feed(flow)
+    assert has_ws_feed(flow)
+    before = len(flow)
+
+    deployer, _api, nr = build(tmp_path, b"CviModelold", ModelManifest("1", "m", ["a"]), flow)
+    deployer.deploy(model_folder, no_backup=True)
+    assert len(nr.flow) == before, "deploy added nodes to a flow that already worked"
+
+
 def test_deploy_uploads_when_hash_differs(model_folder: Path, tmp_path: Path):
     from recamera.manifest import load_bundle
 

@@ -12,6 +12,10 @@ from typing import Any
 os.environ.setdefault(
     "OPENCV_FFMPEG_CAPTURE_OPTIONS", "rtsp_transport;tcp|stimeout;4000000|max_delay;500000"
 )
+# The camera's H.264 stream starts mid-GOP, so FFmpeg logs a burst of
+# "non-existing PPS 0 referenced" before the first keyframe. That is normal,
+# but it reads as an error, so keep it off the console.
+os.environ.setdefault("OPENCV_FFMPEG_LOGLEVEL", "8")
 
 import contextlib
 

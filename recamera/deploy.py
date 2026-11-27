@@ -24,6 +24,7 @@ from pathlib import Path
 from .api import Supervisor
 from .config import Config
 from .errors import DeviceError, ReCameraError
+from .flows import ensure_ws_feed
 from .manifest import Bundle, load_bundle, md5_bytes
 from .nodered import NodeRed, flow_matches, patch_model_nodes
 
@@ -212,6 +213,15 @@ class Deployer:
         flows, _ = self.nodered.get_flows()
         if not patch_model_nodes(flows, manifest):
             raise DeviceError("no 'model' node found in the camera flow")
+
+        # A factory-fresh camera has no /ws/boxes listener, so the viewer would
+        # show nothing. Add just the missing nodes, leaving any custom flow
+        # intact.
+        if ensure_ws_feed(flows):
+            self.log("[*] adding the /ws/boxes feed to the flow")
+        else:
+            self.log("[*] /ws/boxes feed already present")
+
         self.nodered.deploy(flows)
         if not self.wait_until_ready(timeout, min_wait=5):
             warnings.append("services did not settle after flow deploy")

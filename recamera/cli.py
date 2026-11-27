@@ -56,6 +56,10 @@ def _build_parser() -> argparse.ArgumentParser:
 
     listing = sub.add_parser("list", help="list bundled models and models bundled with this repo")
     waiting = sub.add_parser("wait", help="wait until Node-RED and SSCMA are running")
+    fixing = sub.add_parser(
+        "fix-flow",
+        help="add the /ws/boxes feed to a camera flow that lacks it",
+    )
 
     validate = sub.add_parser("validate", help="check a model folder before deploying it")
     validate.add_argument("source", type=Path)
@@ -67,7 +71,7 @@ def _build_parser() -> argparse.ArgumentParser:
     view.add_argument("--no-window", action="store_true", help="run headless")
     view.add_argument("--no-rtsp", action="store_true", help="use preview frames from the websocket only")
 
-    for command in (deploy, default, restore, view, status, backup, listing, waiting):
+    for command in (deploy, default, restore, view, status, backup, listing, waiting, fixing):
         connection(command)
     return parser
 
@@ -223,6 +227,31 @@ def cmd_wait(args: argparse.Namespace) -> int:
     return 1
 
 
+def cmd_fix_flow(args: argparse.Namespace) -> int:
+    """Add the /ws/boxes feed to a camera whose flow lacks it."""
+    from .flows import ensure_ws_feed, has_ws_feed
+
+    deployer = _deployer(args)
+    flows, _ = deployer.nodered.get_flows()
+    if has_ws_feed(flows):
+        print("[*] /ws/boxes feed already present; nothing to do")
+        return 0
+    if not ensure_ws_feed(flows):
+        print("[-] no 'model' node found; is this a reCamera flow?", file=sys.stderr)
+        return 1
+    deployer.nodered.deploy(flows)
+    print("[*] waiting for Node-RED to restart...")
+    deployer.wait_until_ready(args.timeout, min_wait=5)
+    if deployer.nodered.state() == "stop":
+        deployer.nodered.set_state("start")
+    messages = deployer.check_live(seconds=8)
+    if messages > 0:
+        print(f"[+] /ws/boxes is publishing ({messages} messages in 8s)")
+        return 0
+    print("[-] flow deployed but /ws/boxes is still silent; run `recamera status`")
+    return 1
+
+
 def cmd_list(args: argparse.Namespace, as_json: bool) -> int:
     models_dir = default_models_dir()
     bundled = []
@@ -305,6 +334,8 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_restore(args)
         if args.command == "wait":
             return cmd_wait(args)
+        if args.command == "fix-flow":
+            return cmd_fix_flow(args)
         if args.command == "list":
             return cmd_list(args, args.json)
         if args.command == "validate":
